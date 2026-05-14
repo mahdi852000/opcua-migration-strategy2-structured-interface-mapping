@@ -9,7 +9,7 @@ public class Main {
 
             gateway.startup().get();
             System.out.println("OPC UA Gateway Started.");
-            System.out.println("Endpoint: opc.tcp://localhost:4840/legacy-machine");
+            System.out.println("Endpoint: opc.tcp://localhost:4841/structured_interface_mapping");
             System.out.println("Press Enter to stop the server...");
             System.in.read();
             gateway.shutdown().get();
