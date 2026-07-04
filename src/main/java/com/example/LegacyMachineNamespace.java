@@ -27,31 +27,32 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
     public static final String NAMESPACE_URI = "urn:com:example:legacy-machine";
 
     private final LegacyMachineSimulator simulator;
+
+    // Status variable nodes tracked for update
     private UaVariableNode currentStateNode;
     private UaVariableNode isRunningNode;
     private UaVariableNode isIdleNode;
     private UaVariableNode hasFaultNode;
     private UaVariableNode cycleActiveNode;
-
     private UaVariableNode operationModeNode;
     private UaVariableNode temperatureNode;
     private UaVariableNode connectionHealthNode;
 
     public LegacyMachineNamespace(OpcUaServer server, LegacyMachineSimulator simulator) {
         super(server, NAMESPACE_URI);
-
         this.simulator = simulator;
-
         getLifecycleManager().addStartupTask(this::createNodes);
     }
-    private void createNodes() {
-        final String WRAPPER_OBJECT = "LegacyPLC_Wrapper";
-        System.out.println("Creating LegacyMachine namespace nodes...");
 
+    private void createNodes() {
+        final String ROOT = "LegacyPLC_StructuredMapping";
+        System.out.println("Creating Structured Mapping namespace nodes...");
+
+        // ── Root device object (BaseObjectType — no custom type defined) ──────────
         UaObjectNode machineNode = UaObjectNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT))
-                .setBrowseName(newQualifiedName(WRAPPER_OBJECT))
-                .setDisplayName(LocalizedText.english(WRAPPER_OBJECT))
+                .setNodeId(newNodeId(ROOT))
+                .setBrowseName(newQualifiedName(ROOT))
+                .setDisplayName(LocalizedText.english(ROOT))
                 .setTypeDefinition(NodeIds.BaseObjectType)
                 .build();
 
@@ -66,336 +67,111 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
                 )
         );
 
-        currentStateNode = UaVariableNode.build(
-                getNodeContext(),
-                builder->builder
-                        .setNodeId(newNodeId(WRAPPER_OBJECT + "/STS_CURRENT_STATE"))
-                        .setAccessLevel(AccessLevel.READ_WRITE)
-                        .setUserAccessLevel(AccessLevel.READ_WRITE)
-                        .setBrowseName(newQualifiedName( "STS_CURRENT_STATE"))
-                        .setDisplayName(LocalizedText.english("STS_CURRENT_STATE"))
-                        .setDataType(NodeIds.String)
-                        .setTypeDefinition(NodeIds.BaseDataVariableType)
-                        .build()
-        );
+        // ── Functional group objects ──────────────────────────────────────────────
+        // Using BaseObjectType for groups reflects that Strategy 2 introduces
+        // structural organization without defining reusable semantic type definitions.
+        UaObjectNode commandsGroup      = createGroup(machineNode, ROOT, "Commands");
+        UaObjectNode statusGroup        = createGroup(machineNode, ROOT, "Status");
+        UaObjectNode configurationGroup = createGroup(machineNode, ROOT, "Configuration");
+        UaObjectNode diagnosticsGroup   = createGroup(machineNode, ROOT, "Diagnostics");
+        UaObjectNode identityGroup = createGroup(machineNode,ROOT,"Identity");
 
-        currentStateNode.setValue(
-                new DataValue(
-                        new Variant(simulator.getCurrentState().name())
-                )
-        );
-        getNodeManager().addNode(currentStateNode);
-        machineNode.addComponent(currentStateNode);
-
+        // ── Status group variables ────────────────────────────────────────────────
+        currentStateNode = addVariable(
+                statusGroup, ROOT + "/Status", "STS_CURRENT_STATE",
+                NodeIds.String, simulator.getCurrentState().name());
 
         isRunningNode = addVariable(
-                machineNode, WRAPPER_OBJECT, "STS_IS_RUNNING", NodeIds.Boolean, simulator.isRunning());
+                statusGroup, ROOT + "/Status", "STS_IS_RUNNING",
+                NodeIds.Boolean, simulator.isRunning());
+
         isIdleNode = addVariable(
-                machineNode, WRAPPER_OBJECT, "STS_IS_IDLE", NodeIds.Boolean, simulator.isIdle());
+                statusGroup, ROOT + "/Status", "STS_IS_IDLE",
+                NodeIds.Boolean, simulator.isIdle());
+
         hasFaultNode = addVariable(
-                machineNode, WRAPPER_OBJECT, "STS_HAS_FAULT", NodeIds.Boolean, simulator.hasFault());
+                statusGroup, ROOT + "/Status", "STS_HAS_FAULT",
+                NodeIds.Boolean, simulator.hasFault());
+
         cycleActiveNode = addVariable(
-                machineNode, WRAPPER_OBJECT, "STS_CYCLE_ACTIVE", NodeIds.Boolean, simulator.isCycleActive());
+                statusGroup, ROOT + "/Status", "STS_CYCLE_ACTIVE",
+                NodeIds.Boolean, simulator.isCycleActive());
 
         operationModeNode = addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "STS_OPERATION_MODE",
-                NodeIds.String,
-                simulator.getOperationMode()
-        );
+                statusGroup, ROOT + "/Status", "STS_OPERATION_MODE",
+                NodeIds.String, simulator.getOperationMode());
 
         temperatureNode = addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "STS_TEMPERATURE",
-                NodeIds.Double,
-                simulator.getTemperature()
-        );
+                statusGroup, ROOT + "/Status", "STS_TEMPERATURE",
+                NodeIds.Double, simulator.getTemperature());
 
         connectionHealthNode = addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "STS_CONNECTION_HEALTH",
-                NodeIds.String,
-                simulator.getConnectionHealth()
-        );
+                statusGroup, ROOT + "/Status", "STS_CONNECTION_HEALTH",
+                NodeIds.String, simulator.getConnectionHealth());
 
+        // ── Configuration group variables ─────────────────────────────────────────
+        addVariable(configurationGroup, ROOT + "/Configuration",
+                "CFG_TARGET_SPEED",        NodeIds.Double, simulator.getTargetSpeed());
+        addVariable(configurationGroup, ROOT + "/Configuration",
+                "CFG_ACCELERATION_LIMIT",  NodeIds.Double, simulator.getAccelerationLimit());
+        addVariable(configurationGroup, ROOT + "/Configuration",
+                "CFG_TIMEOUT",             NodeIds.Int32,  simulator.getTimeout());
+        addVariable(configurationGroup, ROOT + "/Configuration",
+                "CFG_RETRY_COUNT",         NodeIds.Int32,  simulator.getRetryCount());
+        addVariable(configurationGroup, ROOT + "/Configuration",
+                "CFG_THRESHOLD",           NodeIds.Double, simulator.getThreshold());
 
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "CFG_TARGET_SPEED",
-                NodeIds.Double,
-                simulator.getTargetSpeed()
-        );
+        // ── Diagnostics group variables ───────────────────────────────────────────
+        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
+                "DIAG_ERROR_CODE",          NodeIds.Int32, simulator.getErrorCode());
+        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
+                "DIAG_WARNING_CODE",        NodeIds.Int32, simulator.getWarningCode());
+        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
+                "DIAG_COMM_RETRY_COUNTER",  NodeIds.Int32, simulator.getCommunicationRetryCounter());
+        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
+                "DIAG_UPTIME_SECONDS",      NodeIds.Int64, simulator.getUptimeSeconds());
 
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "CFG_ACCELERATION_LIMIT",
-                NodeIds.Double,
-                simulator.getAccelerationLimit()
-        );
+        // ── Identification group variable ─────────────────────────────────────────
+        addVariable(identityGroup, ROOT + "/Identity",
+                "ID_DEVICE_IDENTITY", NodeIds.String, simulator.getDeviceIdentity());
 
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "CFG_TIMEOUT",
-                NodeIds.Int32,
-                simulator.getTimeout()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "CFG_RETRY_COUNT",
-                NodeIds.Int32,
-                simulator.getRetryCount()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "CFG_THRESHOLD",
-                NodeIds.Double,
-                simulator.getThreshold()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "DIAG_ERROR_CODE",
-                NodeIds.Int32,
-                simulator.getErrorCode()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "DIAG_WARNING_CODE",
-                NodeIds.Int32,
-                simulator.getWarningCode()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "DIAG_COMM_RETRY_COUNTER",
-                NodeIds.Int32,
-                simulator.getCommunicationRetryCounter()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "DIAG_UPTIME_SECONDS",
-                NodeIds.Int64,
-                simulator.getUptimeSeconds()
-        );
-
-        addVariable(
-                machineNode,
-                WRAPPER_OBJECT,
-                "ID_DEVICE_IDENTITY",
-                NodeIds.String,
-                simulator.getDeviceIdentity()
-        );
-
-        UaMethodNode startMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_START"))
-                .setBrowseName(newQualifiedName("CMD_START"))
-                .setDisplayName(LocalizedText.english("CMD_START"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        startMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-                System.out.println("Start method called from OPC UA client.");
-                simulator.start();
-                updateStatusNodes();
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(startMethod);
-        machineNode.addComponent(startMethod);
-
-        UaMethodNode stopMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_STOP"))
-                .setBrowseName(newQualifiedName("CMD_STOP"))
-                .setDisplayName(LocalizedText.english("CMD_STOP"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        stopMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-
-                System.out.println("Stop method called from OPC UA client.");
-
-                simulator.stop();
-
-                updateStatusNodes();
-
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(stopMethod);
-        machineNode.addComponent(stopMethod);
-
-        UaMethodNode resetMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_RESET"))
-                .setBrowseName(newQualifiedName("CMD_RESET"))
-                .setDisplayName(LocalizedText.english("CMD_RESET"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        resetMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-
-                System.out.println("Reset method called from OPC UA client.");
-
-                simulator.reset();
-
-                updateStatusNodes();
-
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(resetMethod);
-        machineNode.addComponent(resetMethod);
-        UaMethodNode pauseMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_PAUSE"))
-                .setBrowseName(newQualifiedName("CMD_PAUSE"))
-                .setDisplayName(LocalizedText.english("CMD_PAUSE"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        pauseMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-                System.out.println("Pause method called from OPC UA client.");
-
-                simulator.pause();
-
-                updateStatusNodes();
-
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(pauseMethod);
-        machineNode.addComponent(pauseMethod);
-
-        UaMethodNode resumeMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_RESUME"))
-                .setBrowseName(newQualifiedName("CMD_RESUME"))
-                .setDisplayName(LocalizedText.english("CMD_RESUME"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        resumeMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-                System.out.println("Resume method called from OPC UA client.");
-
-                simulator.resume();
-
-                updateStatusNodes();
-
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(resumeMethod);
-        machineNode.addComponent(resumeMethod);
-
-        UaMethodNode homeMethod = UaMethodNode.builder(getNodeContext())
-                .setNodeId(newNodeId(WRAPPER_OBJECT + "/CMD_HOME"))
-                .setBrowseName(newQualifiedName("CMD_HOME"))
-                .setDisplayName(LocalizedText.english("CMD_HOME"))
-                .setExecutable(true)
-                .setUserExecutable(true)
-                .build();
-
-        homeMethod.setInvocationHandler(new MethodInvocationHandler() {
-            @Override
-            public CallMethodResult invoke(AccessContext accessContext, CallMethodRequest request) {
-                System.out.println("Home method called from OPC UA client.");
-
-                simulator.home();
-
-                updateStatusNodes();
-
-                return new CallMethodResult(
-                        new StatusCode(StatusCodes.Good),
-                        new StatusCode[0],
-                        new DiagnosticInfo[0],
-                        new Variant[0]
-                );
-            }
-        });
-
-        getNodeManager().addNode(homeMethod);
-        machineNode.addComponent(homeMethod);
-
+        // ── Commands group methods ────────────────────────────────────────────────
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_START",
+                () -> { simulator.start();  updateStatusNodes(); });
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_STOP",
+                () -> { simulator.stop();   updateStatusNodes(); });
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_RESET",
+                () -> { simulator.reset();  updateStatusNodes(); });
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_PAUSE",
+                () -> { simulator.pause();  updateStatusNodes(); });
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_RESUME",
+                () -> { simulator.resume(); updateStatusNodes(); });
+        addMethod(commandsGroup, ROOT + "/Commands", "CMD_HOME",
+                () -> { simulator.home();   updateStatusNodes(); });
     }
-    private void updateStatusNodes() {
-        currentStateNode.setValue(new DataValue(new Variant(simulator.getCurrentState().name())));
-        isRunningNode.setValue(new DataValue(new Variant(simulator.isRunning())));
-        isIdleNode.setValue(new DataValue(new Variant(simulator.isIdle())));
-        hasFaultNode.setValue(new DataValue(new Variant(simulator.hasFault())));
-        operationModeNode.setValue(new DataValue(new Variant(simulator.getOperationMode())));
-        temperatureNode.setValue(new DataValue(new Variant(simulator.getTemperature())));
-        connectionHealthNode.setValue(new DataValue(new Variant(simulator.getConnectionHealth())));
-        cycleActiveNode.setValue(new DataValue(new Variant(simulator.isCycleActive())));
+
+    // ── Helper: create a child Object node (BaseObjectType) ──────────────────────
+    private UaObjectNode createGroup(UaObjectNode parent, String parentPath, String name) {
+        UaObjectNode groupNode = UaObjectNode.builder(getNodeContext())
+                .setNodeId(newNodeId(parentPath + "/" + name))
+                .setBrowseName(newQualifiedName(name))
+                .setDisplayName(LocalizedText.english(name))
+                .setTypeDefinition(NodeIds.BaseObjectType)
+                .build();
+        getNodeManager().addNode(groupNode);
+        parent.addComponent(groupNode);
+        return groupNode;
     }
+
+    // ── Helper: create a Variable node and attach it to a parent ─────────────────
     private UaVariableNode addVariable(
-            UaObjectNode parent,
-            String parentPath,
-            String name,
-            org.eclipse.milo.opcua.stack.core.types.builtin.NodeId dataType,
-            Object value
-    ) {
-        UaVariableNode variableNode = UaVariableNode.build(
+            UaObjectNode parent, String parentPath, String name,
+            org.eclipse.milo.opcua.stack.core.types.builtin.NodeId dataType, Object value) {
+
+        UaVariableNode node = UaVariableNode.build(
                 getNodeContext(),
                 builder -> builder
-                        .setNodeId(newNodeId(parentPath+ "/" + name))
+                        .setNodeId(newNodeId(parentPath + "/" + name))
                         .setAccessLevel(AccessLevel.READ_WRITE)
                         .setUserAccessLevel(AccessLevel.READ_WRITE)
                         .setBrowseName(newQualifiedName(name))
@@ -404,33 +180,61 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
                         .setTypeDefinition(NodeIds.BaseDataVariableType)
                         .build()
         );
-
-        variableNode.setValue(new DataValue(new Variant(value)));
-
-        getNodeManager().addNode(variableNode);
-        parent.addComponent(variableNode);
-
-        return variableNode;
+        node.setValue(new DataValue(new Variant(value)));
+        getNodeManager().addNode(node);
+        parent.addComponent(node);
+        return node;
     }
 
+    // ── Helper: create a Method node and attach it to a parent ───────────────────
+    private void addMethod(UaObjectNode parent, String parentPath, String name, Runnable action) {
+        UaMethodNode method = UaMethodNode.builder(getNodeContext())
+                .setNodeId(newNodeId(parentPath + "/" + name))
+                .setBrowseName(newQualifiedName(name))
+                .setDisplayName(LocalizedText.english(name))
+                .setExecutable(true)
+                .setUserExecutable(true)
+                .build();
+
+        method.setInvocationHandler(new MethodInvocationHandler() {
+            @Override
+            public CallMethodResult invoke(AccessContext ctx, CallMethodRequest request) {
+                System.out.println(name + " called from OPC UA client.");
+                action.run();
+                return new CallMethodResult(
+                        new StatusCode(StatusCodes.Good),
+                        new StatusCode[0],
+                        new DiagnosticInfo[0],
+                        new Variant[0]
+                );
+            }
+        });
+
+        getNodeManager().addNode(method);
+        parent.addComponent(method);
+    }
+
+    // ── Refresh all status variable values after a command ────────────────────────
+    private void updateStatusNodes() {
+        currentStateNode.setValue(new DataValue(new Variant(simulator.getCurrentState().name())));
+        isRunningNode.setValue(new DataValue(new Variant(simulator.isRunning())));
+        isIdleNode.setValue(new DataValue(new Variant(simulator.isIdle())));
+        hasFaultNode.setValue(new DataValue(new Variant(simulator.hasFault())));
+        cycleActiveNode.setValue(new DataValue(new Variant(simulator.isCycleActive())));
+        operationModeNode.setValue(new DataValue(new Variant(simulator.getOperationMode())));
+        temperatureNode.setValue(new DataValue(new Variant(simulator.getTemperature())));
+        connectionHealthNode.setValue(new DataValue(new Variant(simulator.getConnectionHealth())));
+    }
 
     @Override
-    public void onDataItemsCreated(List<DataItem> list) {
-        // Not required for PoC
-    }
+    public void onDataItemsCreated(List<DataItem> list) {}
 
     @Override
-    public void onDataItemsModified(List<DataItem> list) {
-        // Not required for PoC
-    }
+    public void onDataItemsModified(List<DataItem> list) {}
 
     @Override
-    public void onDataItemsDeleted(List<DataItem> list) {
-        // Not required for PoC
-    }
+    public void onDataItemsDeleted(List<DataItem> list) {}
 
     @Override
-    public void onMonitoringModeChanged(List<MonitoredItem> list) {
-        // Not required for PoC
-    }
+    public void onMonitoringModeChanged(List<MonitoredItem> list) {}
 }
