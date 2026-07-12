@@ -9,7 +9,12 @@ public class Main {
 
         gateway.startup().get();
         System.out.println("OPC UA Gateway Started.");
-        System.out.println("Endpoint: opc.tcp://localhost:4841/structured_interface_mapping");
+        System.out.println("Endpoint: opc.tcp://localhost:4842/structured_interface_mapping");
+
+        Thread.sleep(500);
+        NodeSet2Exporter.export(gateway.getNamespace().getCustomNodes(), LegacyMachineNamespace.NAMESPACE_URI,
+        "output/nodeset2.xml");
+
         System.out.println("Press Enter to stop the server...");
         System.in.read();
         gateway.shutdown().get();

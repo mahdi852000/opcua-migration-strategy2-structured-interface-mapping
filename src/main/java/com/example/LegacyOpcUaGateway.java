@@ -23,7 +23,11 @@ import static org.eclipse.milo.opcua.sdk.server.OpcUaServerConfig.USER_TOKEN_POL
 public class LegacyOpcUaGateway {
     private final LegacyMachineSimulator simulator;
     private final LegacyMachineNamespace namespace;
-    private static final int TCP_BIND_PORT = 4841;
+    private static final int TCP_BIND_PORT = 4842;
+
+    public LegacyMachineNamespace getNamespace() {
+        return namespace;
+    }
 
     public final OpcUaServer server;
 

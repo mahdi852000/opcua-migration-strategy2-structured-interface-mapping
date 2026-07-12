@@ -5,12 +5,15 @@ import org.eclipse.milo.opcua.sdk.server.ManagedNamespaceWithLifecycle;
 import org.eclipse.milo.opcua.sdk.server.OpcUaServer;
 import org.eclipse.milo.opcua.sdk.server.items.DataItem;
 import org.eclipse.milo.opcua.sdk.server.items.MonitoredItem;
+import org.eclipse.milo.opcua.sdk.server.nodes.UaNode;
 import org.eclipse.milo.opcua.sdk.server.nodes.UaObjectNode;
 import org.eclipse.milo.opcua.sdk.server.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.stack.core.NodeIds;
 import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.builtin.Variant;
+
+import java.util.ArrayList;
 import java.util.List;
 import org.eclipse.milo.opcua.sdk.server.nodes.UaMethodNode;
 import org.eclipse.milo.opcua.sdk.server.AccessContext;
@@ -27,36 +30,37 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
     public static final String NAMESPACE_URI = "urn:com:example:legacy-machine";
 
     private final LegacyMachineSimulator simulator;
-
-    // Status variable nodes tracked for update
-    private UaVariableNode currentStateNode;
-    private UaVariableNode isRunningNode;
-    private UaVariableNode isIdleNode;
-    private UaVariableNode hasFaultNode;
-    private UaVariableNode cycleActiveNode;
-    private UaVariableNode operationModeNode;
-    private UaVariableNode temperatureNode;
-    private UaVariableNode connectionHealthNode;
+    private final LegacyMachineSimulator simulator2;
+    private final List<UaNode> customNodes = new ArrayList<>();
 
     public LegacyMachineNamespace(OpcUaServer server, LegacyMachineSimulator simulator) {
         super(server, NAMESPACE_URI);
         this.simulator = simulator;
+        this.simulator2 = new LegacyMachineSimulator("FeederController-Prototype-02");
         getLifecycleManager().addStartupTask(this::createNodes);
     }
 
     private void createNodes() {
-        final String ROOT = "LegacyPLC_StructuredMapping";
-        System.out.println("Creating Structured Mapping namespace nodes...");
+        createMachineInstance("LegacyPLC_StructuredMapping", simulator,
+                false);
+        createMachineInstance("LegacyPLC_StructuredMapping_2", simulator2,
+                true);
+    }
+
+    private void createMachineInstance(String rootName, LegacyMachineSimulator simulatorInstance, boolean withMaintenanceAlarm) {
+        System.out.println("Creating Structured Mapping namespace nodes for " + rootName + "...");
 
         // ── Root device object (BaseObjectType — no custom type defined) ──────────
         UaObjectNode machineNode = UaObjectNode.builder(getNodeContext())
-                .setNodeId(newNodeId(ROOT))
-                .setBrowseName(newQualifiedName(ROOT))
-                .setDisplayName(LocalizedText.english(ROOT))
+                .setNodeId(newNodeId(rootName))
+                .setBrowseName(newQualifiedName(rootName))
+                .setDisplayName(LocalizedText.english(rootName))
                 .setTypeDefinition(NodeIds.BaseObjectType)
                 .build();
 
         getNodeManager().addNode(machineNode);
+
+        customNodes.add(machineNode);
 
         machineNode.addReference(
                 new org.eclipse.milo.opcua.sdk.core.Reference(
@@ -68,86 +72,106 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
         );
 
         // ── Functional group objects ──────────────────────────────────────────────
-        // Using BaseObjectType for groups reflects that Strategy 2 introduces
-        // structural organization without defining reusable semantic type definitions.
-        UaObjectNode commandsGroup      = createGroup(machineNode, ROOT, "Commands");
-        UaObjectNode statusGroup        = createGroup(machineNode, ROOT, "Status");
-        UaObjectNode configurationGroup = createGroup(machineNode, ROOT, "Configuration");
-        UaObjectNode diagnosticsGroup   = createGroup(machineNode, ROOT, "Diagnostics");
-        UaObjectNode identityGroup = createGroup(machineNode,ROOT,"Identity");
+        UaObjectNode commandsGroup      = createGroup(machineNode, rootName, "Commands");
+        UaObjectNode statusGroup        = createGroup(machineNode, rootName, "Status");
+        UaObjectNode configurationGroup = createGroup(machineNode, rootName, "Configuration");
+        UaObjectNode diagnosticsGroup   = createGroup(machineNode, rootName, "Diagnostics");
+        UaObjectNode identityGroup      = createGroup(machineNode, rootName, "Identity");
 
-        // ── Status group variables ────────────────────────────────────────────────
-        currentStateNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_CURRENT_STATE",
-                NodeIds.String, simulator.getCurrentState().name());
+        // ── Status group variables (local, per-instance) ──────────────────────────
+        final UaVariableNode currentStateNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_CURRENT_STATE",
+                NodeIds.String, simulatorInstance.getCurrentState().name());
 
-        isRunningNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_IS_RUNNING",
-                NodeIds.Boolean, simulator.isRunning());
+        final UaVariableNode isRunningNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_IS_RUNNING",
+                NodeIds.Boolean, simulatorInstance.isRunning());
 
-        isIdleNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_IS_IDLE",
-                NodeIds.Boolean, simulator.isIdle());
+        final UaVariableNode isIdleNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_IS_IDLE",
+                NodeIds.Boolean, simulatorInstance.isIdle());
 
-        hasFaultNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_HAS_FAULT",
-                NodeIds.Boolean, simulator.hasFault());
+        final UaVariableNode hasFaultNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_HAS_FAULT",
+                NodeIds.Boolean, simulatorInstance.hasFault());
 
-        cycleActiveNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_CYCLE_ACTIVE",
-                NodeIds.Boolean, simulator.isCycleActive());
+        final UaVariableNode cycleActiveNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_CYCLE_ACTIVE",
+                NodeIds.Boolean, simulatorInstance.isCycleActive());
 
-        operationModeNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_OPERATION_MODE",
-                NodeIds.String, simulator.getOperationMode());
+        final UaVariableNode operationModeNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_OPERATION_MODE",
+                NodeIds.String, simulatorInstance.getOperationMode());
 
-        temperatureNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_TEMPERATURE",
-                NodeIds.Double, simulator.getTemperature());
+        final UaVariableNode temperatureNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_TEMPERATURE",
+                NodeIds.Double, simulatorInstance.getTemperature());
 
-        connectionHealthNode = addVariable(
-                statusGroup, ROOT + "/Status", "STS_CONNECTION_HEALTH",
-                NodeIds.String, simulator.getConnectionHealth());
+        final UaVariableNode connectionHealthNode = addVariable(
+                statusGroup, rootName + "/Status", "STS_CONNECTION_HEALTH",
+                NodeIds.String, simulatorInstance.getConnectionHealth());
+        if (withMaintenanceAlarm) {
+            addVariable(statusGroup, rootName + "/Status",
+                    "STS_MAINTENANCE_ALARM_ACTIVE", NodeIds.Boolean, false);
+        }
 
         // ── Configuration group variables ─────────────────────────────────────────
-        addVariable(configurationGroup, ROOT + "/Configuration",
-                "CFG_TARGET_SPEED",        NodeIds.Double, simulator.getTargetSpeed());
-        addVariable(configurationGroup, ROOT + "/Configuration",
-                "CFG_ACCELERATION_LIMIT",  NodeIds.Double, simulator.getAccelerationLimit());
-        addVariable(configurationGroup, ROOT + "/Configuration",
-                "CFG_TIMEOUT",             NodeIds.Int32,  simulator.getTimeout());
-        addVariable(configurationGroup, ROOT + "/Configuration",
-                "CFG_RETRY_COUNT",         NodeIds.Int32,  simulator.getRetryCount());
-        addVariable(configurationGroup, ROOT + "/Configuration",
-                "CFG_THRESHOLD",           NodeIds.Double, simulator.getThreshold());
+        addVariable(configurationGroup, rootName + "/Configuration",
+                "CFG_TARGET_SPEED",        NodeIds.Double, simulatorInstance.getTargetSpeed());
+        addVariable(configurationGroup, rootName + "/Configuration",
+                "CFG_ACCELERATION_LIMIT",  NodeIds.Double, simulatorInstance.getAccelerationLimit());
+        addVariable(configurationGroup, rootName + "/Configuration",
+                "CFG_TIMEOUT",             NodeIds.Int32,  simulatorInstance.getTimeout());
+        addVariable(configurationGroup, rootName + "/Configuration",
+                "CFG_RETRY_COUNT",         NodeIds.Int32,  simulatorInstance.getRetryCount());
+        addVariable(configurationGroup, rootName + "/Configuration",
+                "CFG_THRESHOLD",           NodeIds.Double, simulatorInstance.getThreshold());
+        if (withMaintenanceAlarm) {
+            addVariable(configurationGroup, rootName + "/Configuration",
+                    "CFG_MAINTENANCE_ALARM_THRESHOLD", NodeIds.Double, 80.0);
+        }
 
         // ── Diagnostics group variables ───────────────────────────────────────────
-        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
-                "DIAG_ERROR_CODE",          NodeIds.Int32, simulator.getErrorCode());
-        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
-                "DIAG_WARNING_CODE",        NodeIds.Int32, simulator.getWarningCode());
-        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
-                "DIAG_COMM_RETRY_COUNTER",  NodeIds.Int32, simulator.getCommunicationRetryCounter());
-        addVariable(diagnosticsGroup, ROOT + "/Diagnostics",
-                "DIAG_UPTIME_SECONDS",      NodeIds.Int64, simulator.getUptimeSeconds());
+        addVariable(diagnosticsGroup, rootName + "/Diagnostics",
+                "DIAG_ERROR_CODE",          NodeIds.Int32, simulatorInstance.getErrorCode());
+        addVariable(diagnosticsGroup, rootName + "/Diagnostics",
+                "DIAG_WARNING_CODE",        NodeIds.Int32, simulatorInstance.getWarningCode());
+        addVariable(diagnosticsGroup, rootName + "/Diagnostics",
+                "DIAG_COMM_RETRY_COUNTER",  NodeIds.Int32, simulatorInstance.getCommunicationRetryCounter());
+        addVariable(diagnosticsGroup, rootName + "/Diagnostics",
+                "DIAG_UPTIME_SECONDS",      NodeIds.Int64, simulatorInstance.getUptimeSeconds());
+
+
 
         // ── Identification group variable ─────────────────────────────────────────
-        addVariable(identityGroup, ROOT + "/Identity",
-                "ID_DEVICE_IDENTITY", NodeIds.String, simulator.getDeviceIdentity());
+        addVariable(identityGroup, rootName + "/Identity",
+                "ID_DEVICE_IDENTITY", NodeIds.String, simulatorInstance.getDeviceIdentity());
+
+        // ── Per-instance status refresh closure ───────────────────────────────────
+        final Runnable updateStatus = () -> {
+            currentStateNode.setValue(new DataValue(new Variant(simulatorInstance.getCurrentState().name())));
+            isRunningNode.setValue(new DataValue(new Variant(simulatorInstance.isRunning())));
+            isIdleNode.setValue(new DataValue(new Variant(simulatorInstance.isIdle())));
+            hasFaultNode.setValue(new DataValue(new Variant(simulatorInstance.hasFault())));
+            cycleActiveNode.setValue(new DataValue(new Variant(simulatorInstance.isCycleActive())));
+            operationModeNode.setValue(new DataValue(new Variant(simulatorInstance.getOperationMode())));
+            temperatureNode.setValue(new DataValue(new Variant(simulatorInstance.getTemperature())));
+            connectionHealthNode.setValue(new DataValue(new Variant(simulatorInstance.getConnectionHealth())));
+        };
 
         // ── Commands group methods ────────────────────────────────────────────────
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_START",
-                () -> { simulator.start();  updateStatusNodes(); });
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_STOP",
-                () -> { simulator.stop();   updateStatusNodes(); });
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_RESET",
-                () -> { simulator.reset();  updateStatusNodes(); });
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_PAUSE",
-                () -> { simulator.pause();  updateStatusNodes(); });
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_RESUME",
-                () -> { simulator.resume(); updateStatusNodes(); });
-        addMethod(commandsGroup, ROOT + "/Commands", "CMD_HOME",
-                () -> { simulator.home();   updateStatusNodes(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_START",
+                () -> { simulatorInstance.start();  updateStatus.run(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_STOP",
+                () -> { simulatorInstance.stop();   updateStatus.run(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_RESET",
+                () -> { simulatorInstance.reset();  updateStatus.run(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_PAUSE",
+                () -> { simulatorInstance.pause();  updateStatus.run(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_RESUME",
+                () -> { simulatorInstance.resume(); updateStatus.run(); });
+        addMethod(commandsGroup, rootName + "/Commands", "CMD_HOME",
+                () -> { simulatorInstance.home();   updateStatus.run(); });
     }
 
     // ── Helper: create a child Object node (BaseObjectType) ──────────────────────
@@ -159,6 +183,7 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
                 .setTypeDefinition(NodeIds.BaseObjectType)
                 .build();
         getNodeManager().addNode(groupNode);
+        customNodes.add(groupNode);
         parent.addComponent(groupNode);
         return groupNode;
     }
@@ -182,6 +207,7 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
         );
         node.setValue(new DataValue(new Variant(value)));
         getNodeManager().addNode(node);
+        customNodes.add(node);
         parent.addComponent(node);
         return node;
     }
@@ -211,19 +237,11 @@ public class LegacyMachineNamespace extends ManagedNamespaceWithLifecycle {
         });
 
         getNodeManager().addNode(method);
+        customNodes.add(method);
         parent.addComponent(method);
     }
-
-    // ── Refresh all status variable values after a command ────────────────────────
-    private void updateStatusNodes() {
-        currentStateNode.setValue(new DataValue(new Variant(simulator.getCurrentState().name())));
-        isRunningNode.setValue(new DataValue(new Variant(simulator.isRunning())));
-        isIdleNode.setValue(new DataValue(new Variant(simulator.isIdle())));
-        hasFaultNode.setValue(new DataValue(new Variant(simulator.hasFault())));
-        cycleActiveNode.setValue(new DataValue(new Variant(simulator.isCycleActive())));
-        operationModeNode.setValue(new DataValue(new Variant(simulator.getOperationMode())));
-        temperatureNode.setValue(new DataValue(new Variant(simulator.getTemperature())));
-        connectionHealthNode.setValue(new DataValue(new Variant(simulator.getConnectionHealth())));
+    public List<UaNode> getCustomNodes() {
+        return customNodes;
     }
 
     @Override
